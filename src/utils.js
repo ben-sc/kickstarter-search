@@ -1,17 +1,31 @@
-const Apify = require('apify');
-const moment = require('moment');
-const cheerio = require('cheerio');
+const Apify = require("apify");
+const moment = require("moment");
+const cheerio = require("cheerio");
 
-const { EMPTY_SELECT, LOCATION_SEARCH_ACTOR_ID, DEFAULT_SORT_ORDER, DATE_FORMAT } = require('./consts');
-const { statuses, categories, pledges, goals, raised, sorts } = require('./filters');
+const {
+    EMPTY_SELECT,
+    LOCATION_SEARCH_ACTOR_ID,
+    DEFAULT_SORT_ORDER,
+    DATE_FORMAT,
+} = require("./consts");
+const {
+    statuses,
+    categories,
+    pledges,
+    goals,
+    raised,
+    sorts,
+} = require("./filters");
 
-const { utils: { log, requestAsBrowser } } = Apify;
+const {
+    utils: { log, requestAsBrowser },
+} = Apify;
 
 // 1. FUNCTION TO REMOVE NO NEED KEYS FROM THE ITEM OBJECT
 function cleanProject(project) {
     const cleanedProject = {
         ...project,
-        photo: project.photo?.project?.photo?.full ?? null,
+        photo: project.photo?.full ?? null,
         creatorId: project.creator?.id ?? null,
         creatorName: project.creator?.name ?? null,
         creatorAvatar: project.creator?.avatar?.medium ?? null,
@@ -26,8 +40,12 @@ function cleanProject(project) {
         description: project.blurb,
         link: project.urls?.web?.project ?? null,
         pubDate: moment.unix(project.launched_at).format(DATE_FORMAT),
-        created_at_formatted: moment.unix(project.created_at).format(DATE_FORMAT),
-        launched_at_formatted: moment.unix(project.launched_at).format(DATE_FORMAT),
+        created_at_formatted: moment
+            .unix(project.created_at)
+            .format(DATE_FORMAT),
+        launched_at_formatted: moment
+            .unix(project.launched_at)
+            .format(DATE_FORMAT),
     };
 
     delete cleanedProject.creator;
@@ -44,14 +62,18 @@ async function processLocation(location) {
     log.info(`Quering kickstarter for location ID of "${location}"...`);
     // CALLING SEPARATE ACTOR TO GET ID OF THE LOCATION
     const run = await Apify.call(LOCATION_SEARCH_ACTOR_ID, { query: location });
-    if (run.status !== 'SUCCEEDED') {
-        log.warning(`Actor ${LOCATION_SEARCH_ACTOR_ID} did not finish correctly. Please check your "location" field in the input, and try again.`);
+    if (run.status !== "SUCCEEDED") {
+        log.warning(
+            `Actor ${LOCATION_SEARCH_ACTOR_ID} did not finish correctly. Please check your "location" field in the input, and try again.`
+        );
         return;
     }
     // GETTING LOCATIONS
     const { locations } = run.output.body;
     if (!locations.length) {
-        log.warning(`Location "${location}" was not found. Please check your "location" field in the input, and try again.`);
+        log.warning(
+            `Location "${location}" was not found. Please check your "location" field in the input, and try again.`
+        );
         return;
     }
     // GETTING ONLY THE FIRST ONE
@@ -62,7 +84,9 @@ async function processLocation(location) {
 // 3. CHECKING THE INPUT
 async function parseInput(input) {
     if (!input) {
-        log.warning('Key-value store does not contain INPUT. Actor will be stopped.');
+        log.warning(
+            "Key-value store does not contain INPUT. Actor will be stopped."
+        );
         return;
     }
     const queryParams = {};
@@ -70,7 +94,8 @@ async function parseInput(input) {
     // FILTER OUT EMPTY FILTER VALUES
     const filledInFilters = {};
     Object.keys(input).forEach((key) => {
-        const filterValue = (typeof (input[key]) === 'string') ? input[key].trim() : input[key];
+        const filterValue =
+            typeof input[key] === "string" ? input[key].trim() : input[key];
         if (!filterValue || filterValue === EMPTY_SELECT) return;
         filledInFilters[key] = filterValue;
     });
@@ -82,7 +107,10 @@ async function parseInput(input) {
     if (filledInFilters.category) {
         const fromInputLowerCase = filledInFilters.category.toLowerCase();
         const foundCategories = categories.filter((category) => {
-            return fromInputLowerCase.category === category.id || fromInputLowerCase === category.slug.toLowerCase();
+            return (
+                fromInputLowerCase.category === category.id ||
+                fromInputLowerCase === category.slug.toLowerCase()
+            );
         });
 
         if (!foundCategories.length) {
@@ -119,7 +147,9 @@ async function parseInput(input) {
     if (filledInFilters.goal) {
         const goal = goals.indexOf(filledInFilters.goal.toLowerCase());
         if (goal === -1) {
-            log.warning(`Input parameter goal contains invalid value: "${filledInFilters.goal}". Please check the input. Actor will be stopped.`);
+            log.warning(
+                `Input parameter goal contains invalid value: "${filledInFilters.goal}". Please check the input. Actor will be stopped.`
+            );
             return;
         }
         queryParams.goal = goal;
@@ -127,7 +157,9 @@ async function parseInput(input) {
 
     // process raised
     if (filledInFilters.raised) {
-        const amountRaised = raised.indexOf(filledInFilters.raised.toLowerCase());
+        const amountRaised = raised.indexOf(
+            filledInFilters.raised.toLowerCase()
+        );
         if (amountRaised === -1) {
             log.warning(`Input parameter "raised" contains invalid value: "${filledInFilters.raised}".\n
             Please check the input. Actor will be finished.`);
@@ -140,7 +172,9 @@ async function parseInput(input) {
     if (filledInFilters.sort) {
         const sort = sorts.indexOf(filledInFilters.sort.toLowerCase());
         if (sort === -1) {
-            log.warning(`Input parameter "sort" contains invalid value: "${filledInFilters.sort}". Please check the input. Actor will be stopped`);
+            log.warning(
+                `Input parameter "sort" contains invalid value: "${filledInFilters.sort}". Please check the input. Actor will be stopped`
+            );
             return;
         }
         queryParams.sort = filledInFilters.sort.toLowerCase();
@@ -148,7 +182,8 @@ async function parseInput(input) {
         queryParams.sort = DEFAULT_SORT_ORDER;
     }
 
-    if (filledInFilters.location) queryParams.woe_id = await processLocation(filledInFilters.location);
+    if (filledInFilters.location)
+        queryParams.woe_id = await processLocation(filledInFilters.location);
 
     queryParams.page = 1;
 
@@ -165,8 +200,10 @@ async function getToken(url, session, proxyConfiguration) {
     });
 
     const $ = cheerio.load(html.body);
-    const seed = $('.js-project-group[data-seed]').attr('data-seed');
-    const cookies = (html.headers['set-cookie'] || []).map((s) => s.split(';', 2)[0]).join('; ');
+    const seed = $(".js-project-group[data-seed]").attr("data-seed");
+    const cookies = (html.headers["set-cookie"] || [])
+        .map((s) => s.split(";", 2)[0])
+        .join("; ");
 
     return {
         seed,
@@ -183,26 +220,34 @@ async function getToken(url, session, proxyConfiguration) {
  * @return {Void}
  */
 function notifyAboutMaxResults(foundProjects, limit) {
-    log.info('|');
+    log.info("|");
     log.info(`| Found ${foundProjects} projects in total.`);
     log.info(`| Will be output: ${limit} projects.`);
-    log.info('| ');
-    log.info('|');
+    log.info("| ");
+    log.info("|");
 }
 
 const proxyConfiguration = async ({
     proxyConfig,
     required = true,
     force = Apify.isAtHome(),
-    blacklist = ['GOOGLESERP'],
+    blacklist = ["GOOGLESERP"],
     hint = [],
 }) => {
     const configuration = await Apify.createProxyConfiguration(proxyConfig);
 
     // this works for custom proxyUrls
     if (Apify.isAtHome() && required) {
-        if (!configuration || (!configuration.usesApifyProxy && (!configuration.proxyUrls || !configuration.proxyUrls.length)) || !configuration.newUrl()) {
-            throw new Error('\n=======\nYou must use Apify proxy or custom proxy URLs\n\n=======');
+        if (
+            !configuration ||
+            (!configuration.usesApifyProxy &&
+                (!configuration.proxyUrls ||
+                    !configuration.proxyUrls.length)) ||
+            !configuration.newUrl()
+        ) {
+            throw new Error(
+                "\n=======\nYou must use Apify proxy or custom proxy URLs\n\n======="
+            );
         }
     }
 
@@ -210,13 +255,30 @@ const proxyConfiguration = async ({
     if (force) {
         // only when actually using Apify proxy it needs to be checked for the groups
         if (configuration && configuration.usesApifyProxy) {
-            if (blacklist.some((blacklisted) => (configuration.groups || []).includes(blacklisted))) {
-                throw new Error(`\n=======\nThese proxy groups cannot be used in this actor. Choose other group or contact support@apify.com to give you proxy trial:\n\n*  ${blacklist.join('\n*  ')}\n\n=======`);
+            if (
+                blacklist.some((blacklisted) =>
+                    (configuration.groups || []).includes(blacklisted)
+                )
+            ) {
+                throw new Error(
+                    `\n=======\nThese proxy groups cannot be used in this actor. Choose other group or contact support@apify.com to give you proxy trial:\n\n*  ${blacklist.join(
+                        "\n*  "
+                    )}\n\n=======`
+                );
             }
 
             // specific non-automatic proxy groups like RESIDENTIAL, not an error, just a hint
-            if (hint.length && !hint.some((group) => (configuration.groups || []).includes(group))) {
-                Apify.utils.log.info(`\n=======\nYou can pick specific proxy groups for better experience:\n\n*  ${hint.join('\n*  ')}\n\n=======`);
+            if (
+                hint.length &&
+                !hint.some((group) =>
+                    (configuration.groups || []).includes(group)
+                )
+            ) {
+                Apify.utils.log.info(
+                    `\n=======\nYou can pick specific proxy groups for better experience:\n\n*  ${hint.join(
+                        "\n*  "
+                    )}\n\n=======`
+                );
             }
         }
     }
